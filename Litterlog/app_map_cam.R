@@ -9,7 +9,13 @@ library(tidyverse)
 
 #Setting up the databases
 # userdata
-userdata<- gs4_create(name = "vol_data") #create a data
+#userdata<- gs4_create(name = "vol_data") #create a data
+#Photo data
+
+
+
+
+
 #App starts
 ui <- dashboardPage(
   dashboardHeader(title = "Litter-Log"), # Title
@@ -102,7 +108,7 @@ server <- function(input, output) {
     
       })
   
-  
+  #registartion for new users
   observeEvent(input$send, {
     require(tidyverse)
     #gather info of all the relevant inputs
@@ -113,11 +119,30 @@ server <- function(input, output) {
     sheet_append(userbase, data = client_df)
   })
   
+  #create data from user data for camera input
+  users<- data.frame(read_sheet(ss = userdata,range = "A:A"))#collect usernames
+  df = data.frame(names=users$Name,photo="",Notes="",Longitude="",Latitude="") 
+  
+  library(googlesheets4)
+  photodata<- gs4_create(name = "metaphoto",sheets = "photo")
+  sheet_write(ss = photodata,data = tibble::tibble(df),sheet = "photo")
+  # Add camera 
   observeEvent(input$camera,{
-    
+    # add model dialogue
     showModal(modalDialog(
-      
-      
+      column(width = 8,align="center",
+             title = "Title",
+      tags$img(src="www/bisi_image.jpeg"),
+      fileInput(inputId = "camera",accept = "jpeg",label = "Turn on your camera",capture = "camera",buttonLabel = "camera",placeholder = "No photos taken"),
+      sliderInput("slider2", label = h3("Slider Range"), min = 1, 
+                  max = 1000, value = c(40, 60)),
+      selectInput("select", label = h3("Select shape"), 
+                  choices = list("Square" = 1, "rectangle" = 2, "round" = 3), 
+                  selected = 1),
+      actionButton(inputId = "submit",label = "submit"),
+       easyClose = TRUE,
+      footer = NULL
+      )
       
     ))
     
