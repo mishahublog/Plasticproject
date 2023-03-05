@@ -1,16 +1,20 @@
+
+
+
+
 library(shiny)
 library(shinyjs)
 library(leaflet)
+library(shinydashboard)
+library(shinydashboardPlus)
 library(shinyauthr)
 library(shinymanager)
 library(shinyWidgets)
-library(googlesheets4)
 library(tidyverse)
-library(googledrive)
 library(base64enc)
 library(writexl)
 #library(gargle)
-library(bs4Dash)
+#library(bs4Dash)
 
 
 library(rdrop2)
@@ -22,69 +26,83 @@ saveRDS(token, file = "token.rds")
 
 drop_userbase<- drop_download("vol_data.xlsx",dtoken = token,overwrite = TRUE)
 drop_photodata<- drop_download("photodata.xlsx",dtoken = token,overwrite = TRUE)
+
 library(readxl)
 userbase<- data.frame(read_excel("vol_data.xlsx"))
 photodata<- data.frame(read_excel("photodata.xlsx"))
 
 #App starts====
-ui <- dashboardPage(
+ui <- dashboardPage(freshTheme = "mytheme.css",skin = "purple",
+                   
+  
  
-  dashboardHeader(title = "Litter-Log"), # Title
-  dashboardSidebar(skin = "dark",
-                   #      tags$style(HTML(".sidebar-menu li a { font-size: 100px; color: red}")),
+ dashboardHeader(title = "Litter-Log"), # Title
+  dashboardSidebar(
+   
+                   #tags$style(HTML(".sidebar-menu li a { font-size: 100px; color: red}")),
                    sidebarMenu(
-                     uiOutput("userpro")
-                     
+                     menuItem("Login", tabName = "UserLogin", icon = icon("sign-in")),
+                     menuItem("map", tabName = "map", icon = icon("map"),badgeLabel = "Desktop only",badgeColor = "red")
                    )),
   
-  dashboardBody(tags$head(
-    tags$style(
-      "body {overflow-y: hidden;}"
-    )
-  ),
-  
-    #conditional panel for login=====
-    conditionalPanel(
-      condition = ("input.login == 1"),
-      tags$style(".login-ui input {background-color: grey  !important; color: white !important; border-color: black !important; }"),
-      div(class = "login-ui",
-          shinyauthr::loginUI(id = "login",
-                                          title = "Please log in", 
-                                                  user_title = "User",
-                                                  pass_title = "Password", 
-                                                  login_title = "Log in",
-                                                  error_message = "Incorrect user or password")),
-      
-      div(class = "pull-right", logoutUI(id = "logout", 
-                                         label = "Log out", 
-                                         icon = NULL, 
-                                         class = "btn-danger",
-                                         style = "color: black; 
-                                         background-color: darkgoldenrod; border-color: black !important"))
-      
-      
-    ),
-    
-    
+  dashboardBody(
+    tags$script('
+      $(document).ready(function () {
+        navigator.geolocation.getCurrentPosition(onSuccess, onError);
+              
+        function onError (err) {
+          Shiny.onInputChange("geolocation", false);
+        }
+              
+        function onSuccess (position) {
+          setTimeout(function () {
+            var coords = position.coords;
+            console.log(coords.latitude + ", " + coords.longitude);
+            Shiny.onInputChange("geolocation", true);
+            Shiny.onInputChange("lat", coords.latitude);
+            Shiny.onInputChange("long", coords.longitude);
+          }, 1100)
+        }
+      });
+              '),
+
+    tabItems(
+      tabItem(tabName = "UserLogin",
+              div(class = "pull-right", shinyauthr::logoutUI(id = "logout")),
+              shinyauthr::loginUI(id = "login"),
+              uiOutput("infobox")
+            
+
+              
+              ),
+
+    tabItem(tabName = "map",
     #fill maps=====
-    fillPage(
-      leafletOutput("mymap",height = 800) # Adding Map
-    ),
+    fluidRow(
+     fillPage(
+        leafletOutput("mymap",height = 700) # Adding Map
+      )))),
+    
+    
+      
+      # add login panel UI function
+      
+    
+     
+      
+     
+      
+      
+    #),
+    
+    
+   
     
     #flotting buttons====
     fab_button(
       actionButton("register", "Show registration"),
       actionButton("camera","camera",icon = icon("camera")),
-      actionButton(
-        inputId = "login",
-        label = "Login",
-        icon = icon("sign-in")
-      ),
-      actionButton(
-        inputId = "logout",
-        label = "Logout",
-        icon = icon("sign-out")
-      ),
+      
       actionButton(
         inputId = "info",
         label = "Information",
@@ -101,12 +119,11 @@ ui <- dashboardPage(
 #server=======
 server <- function(input, output) {
   
-  
   # call login module supplying data frame, user and password cols
   # and reactive trigger============
   credentials <- callModule(shinyauthr::login, 
                             id = "login", 
-                            data = userbase,
+                            data = userbase, 
                             user_col = user,
                             pwd_col = password,
                             log_out = reactive(logout_init()))
@@ -208,9 +225,22 @@ server <- function(input, output) {
         
         column(width = 8,align="center",
                title = "Title",
+               #condition for display Ui image 
+               conditionalPanel(
+                  condition = "is.null(input[['upload']]==TRUE )",
+                  uiOutput("userpro")
+                  
+               ),
+               conditionalPanel(
+                 condition = "!is.null(input[['upload']]==TRUE )",
+                 uiOutput("image")
+                 
+               ),
+                 
+               
+               
                #camera
-               uiOutput("image"),
-               fileInput("upload", "Upload image", accept = "image/png",capture = "camera"),
+               fileInput("upload", "Upload image", accept = "image/png",capture = "camera",buttonLabel = "Camera"),
                
                #fileInput(inputId = "camera",accept = "image/png",
                #         label = "Turn on your camera",buttonLabel = "camera",placeholder = "No photos taken"),
@@ -233,16 +263,18 @@ server <- function(input, output) {
   })
   
   #Find userb and update data
-  user_data <- reactive({
+  observeEvent(input$submit,{
     #Get data
     timeid<- str_sub(str_remove_all(Sys.time(),pattern = ":"),start = 1,end = 13)
-    photo_meta<- tibble(name=paste(credentials()$info$user,timeid,sep = ""),
-                        size=input$slider2,
-                        select=input$select,
-                        longitude="",Latitude="",photolink="")
-    photodata<- rbind(photodata,photo_meta)
+  library(dplyr)
+    photodata<- bind_rows(photodata,tibble(name=paste(credentials()$info$user,timeid,sep = ""),
+                                       size=input$slider2,
+                                       select=input$select,
+                                       longitude= input$long,latitude= input$lat))
     write_xlsx(photodata,"photodata.xlsx")
     drop_upload("photodata.xlsx",dtoken = token,mode = "overwrite")
+   
+    
     
   })
   #photo file
@@ -253,21 +285,27 @@ server <- function(input, output) {
     inFile <- input$upload
     if (is.null(inFile))
       return()
-    file.copy(inFile$datapath, file.path("c:/temp", paste(credentials()$info$user,timeid,".png",sep = "")) )
+    file.copy(inFile$datapath, file.path(paste(credentials()$info$user,timeid,".png",sep = "")) )
   })
   
-  observeEvent(input$submit, {
+  observeEvent(input$submit,{
     drop_upload(paste(credentials()$info$user,timeid,".png",
                       sep = ""),dtoken = token,mode = "overwrite")
-    
-    
+  })
+  
+  
+  #After photo taken
+  observeEvent(input$submit,{
+    showModal(modalDialog(
+      "Hmm, this is really great"
+    ))
   })
   #show photo
   base64 <- reactive({
     inFile <- input[["upload"]] 
     if(!is.null(inFile)){
       dataURI(file = inFile$datapath)
-    }
+    } 
   })
   
   output[["image"]] <- renderUI({
@@ -284,12 +322,27 @@ output$userpro<- renderUI({
   req(credentials()$user_auth)
   userBox(
     title = userDescription(
-      title = "Alexander Pierce",
-      subtitle = "Founder & CEO",
-      type = 1,
-      image = "https://adminlte.io/themes/AdminLTE/dist/img/user1-128x128.jpg",
+      title = "Shoot at sight",
+      subtitle = "Take your camera",
+      type = 1,backgroundImage = "https://images.pexels.com/photos/9037602/pexels-photo-9037602.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2",
+      image = "https://cdn-icons-png.flaticon.com/512/5708/5708327.png",
     ))
-})
+  })
+  
+output$infobox<- renderUI({
+    req(credentials()$user_auth)
+    fluidRow(
+      # A static infoBox
+      infoBox("Photos Taken", 10 * 2, icon = icon("credit-card"),width = 3),
+      # Dynamic infoBoxes
+      infoBox("Plastics Detected",width=3,),
+      infoBox("Locations covered",width = 3),
+    )
+    
+  })
+  
+  
+
   
   
   
